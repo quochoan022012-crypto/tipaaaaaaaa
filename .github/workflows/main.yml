@@ -3,8 +3,7 @@ name: Build TIPA
 on:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [ "main" ]
 
 permissions:
   contents: read
@@ -17,7 +16,7 @@ jobs:
       THEOS: ${{ github.workspace }}/theos
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           lfs: true
@@ -35,80 +34,78 @@ jobs:
             ldid \
             fakeroot \
             dpkg-dev \
-            xz-utils
+            xz-utils \
+            libplist-dev \
+            libxml2-dev \
+            libssl-dev \
+            libbz2-dev \
+            libreadline-dev \
+            zlib1g-dev
+
+      - name: Cache Theos
+        id: cache-theos
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.THEOS }}
+          key: ${{ runner.os }}-theos-v1
 
       - name: Install Theos
+        if: steps.cache-theos.outputs.cache-hit != 'true'
         run: |
           rm -rf "$THEOS"
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
 
-          git clone --recursive \
-            https://github.com/theos/theos.git \
-            "$THEOS"
-
-          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+      - name: Cache iOS SDK
+        id: cache-sdk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.THEOS }}/sdks
+          key: ${{ runner.os }}-ios-sdk-v1
 
       - name: Install iOS SDK
+        if: steps.cache-sdk.outputs.cache-hit != 'true'
         run: |
           set -euxo pipefail
-
           mkdir -p "$THEOS/sdks"
-
           cd "$THEOS/sdks"
-
-          git clone --depth 1 \
-            https://github.com/theos/sdks.git \
-            /tmp/theos-sdks
-
-          find /tmp/theos-sdks -maxdepth 1 -type f \
-            -name "*.sdk.tar.xz" \
-            -exec tar -xf {} -C "$THEOS/sdks" \;
-
-          find "$THEOS/sdks" -maxdepth 1 -type d -name "*.sdk" -print
-
+          # Tải SDK từ kho theos/sdks
+          git clone --depth 1 https://github.com/theos/sdks.git /tmp/theos-sdks
+          find /tmp/theos-sdks -maxdepth 1 -type f -name "*.sdk.tar.xz" -exec tar -xf {} -C "$THEOS/sdks" \;
+          # Xóa thư mục tạm
+          rm -rf /tmp/theos-sdks
+          # Kiểm tra xem đã cài SDK thành công chưa
           if ! find "$THEOS/sdks" -maxdepth 1 -type d -name "*.sdk" | grep -q .; then
             echo "ERROR: No iOS SDK was installed."
             exit 1
           fi
 
-      - name: Verify Theos SDK
+      - name: Verify Theos and SDK
         run: |
-          set -euxo pipefail
-
           echo "THEOS=$THEOS"
           echo "SDK directory:"
           ls -lah "$THEOS/sdks"
-
           echo "SDKs:"
-          find "$THEOS/sdks" \
-            -maxdepth 1 \
-            -type d \
-            -name "*.sdk" \
-            -print
+          find "$THEOS/sdks" -maxdepth 1 -type d -name "*.sdk" -print
+
+      - name: Fix Makefile (optional)
+        run: |
+          # Sửa lỗi cú pháp dòng export trong Makefile nếu có
+          if grep -q '^export = THEOS' makefile; then
+            sed -i 's/^export = THEOS \/home\/codespace\/theos/export THEOS=\/home\/codespace\/theos/' makefile
+            echo "Fixed export line in Makefile"
+          fi
 
       - name: Clean
         run: |
           set -o pipefail
-
           make clean || true
 
       - name: Build TIPA
         run: |
           set -euxo pipefail
-
           make package FINALPACKAGE=1
 
-      - name: Find TIPA
-        run: |
-          set -euxo pipefail
-
-          echo "Searching for TIPA..."
-
-          find . \
-            -type f \
-            \( -name "*.tipa" -o -name "*.ipa" \) \
-            -print
-
-      - name: Upload TIPA
+      - name: Find and upload TIPA
         uses: actions/upload-artifact@v4
         with:
           name: TIPA
