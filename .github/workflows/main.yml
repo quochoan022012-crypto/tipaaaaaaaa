@@ -41,7 +41,7 @@ jobs:
             libreadline-dev \
             zlib1g-dev \
             g++
-          # Tải và build ldid từ source tarball (tránh lỗi git credentials)
+          # Build ldid từ source (không dùng git clone để tránh lỗi xác thực)
           wget https://github.com/theos/ldid/archive/refs/heads/master.tar.gz -O ldid.tar.gz
           tar -xzf ldid.tar.gz
           cd ldid-master
@@ -92,7 +92,7 @@ jobs:
           echo "SDKs:"
           find "$THEOS/sdks" -maxdepth 1 -type d -name "*.sdk" -print
 
-      - name: Fix Makefile (optional)
+      - name: Fix Makefile (sửa lỗi cú pháp export nếu có)
         run: |
           if grep -q '^export = THEOS' makefile; then
             sed -i 's/^export = THEOS \/home\/codespace\/theos/export THEOS=\/home\/codespace\/theos/' makefile
