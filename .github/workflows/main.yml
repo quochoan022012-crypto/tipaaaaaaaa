@@ -40,7 +40,7 @@ jobs:
             libbz2-dev \
             libreadline-dev \
             zlib1g-dev
-          # Cài ldid (không có sẵn trong Ubuntu repo)
+          # Cài ldid (đường dẫn đúng)
           wget -O ldid https://github.com/theos/ldid/raw/master/ldid
           chmod +x ldid
           sudo mv ldid /usr/local/bin/
