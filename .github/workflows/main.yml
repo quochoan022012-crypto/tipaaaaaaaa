@@ -39,14 +39,16 @@ jobs:
             libssl-dev \
             libbz2-dev \
             libreadline-dev \
-            zlib1g-dev
-          # Build ldid từ source
-          git clone https://github.com/theos/ldid.git
-          cd ldid
+            zlib1g-dev \
+            g++
+          # Tải và build ldid từ source tarball (tránh lỗi git credentials)
+          wget https://github.com/theos/ldid/archive/refs/heads/master.tar.gz -O ldid.tar.gz
+          tar -xzf ldid.tar.gz
+          cd ldid-master
           make
           sudo make install
           cd ..
-          rm -rf ldid
+          rm -rf ldid-master ldid.tar.gz
 
       - name: Cache Theos
         id: cache-theos
