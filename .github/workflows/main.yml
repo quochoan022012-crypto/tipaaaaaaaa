@@ -1,0 +1,118 @@
+name: Build TIPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build TIPA
+    runs-on: ubuntu-24.04
+
+    env:
+      THEOS: ${{ github.workspace }}/theos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            make \
+            perl \
+            git \
+            curl \
+            wget \
+            unzip \
+            ldid
+
+      - name: Install Theos
+        run: |
+          git clone --recursive https://github.com/theos/theos.git "$THEOS"
+
+          mkdir -p "$THEOS/toolchain"
+
+          git clone --depth=1 \
+            https://github.com/theos/headers.git \
+            "$THEOS/headers"
+
+          git clone --depth=1 \
+            https://github.com/theos/sdks.git \
+            "$THEOS/sdks"
+
+          git clone --depth=1 \
+            https://github.com/theos/llvm.git \
+            "$THEOS/toolchain/llvm"
+
+      - name: Verify project
+        run: |
+          echo "===== PROJECT ====="
+          pwd
+          find . -maxdepth 2 -type f | sort
+          echo "===== MAKEFILE ====="
+          test -f makefile && cat makefile
+          test -f Makefile && cat Makefile || true
+
+      - name: Build package
+        run: |
+          export THEOS="$GITHUB_WORKSPACE/theos"
+
+          make clean
+          make package FINALPACKAGE=1 STRIP=0 messages=yes
+
+      - name: Find output
+        run: |
+          echo "===== PACKAGES ====="
+          find . -type f \( \
+            -name "*.deb" -o \
+            -name "*.tipa" -o \
+            -name "*.ipa" \
+          \) -print
+
+      - name: Create TIPA
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p output
+
+          PKG=$(find packages .theos -type f -name "*.deb" 2>/dev/null | head -n 1 || true)
+
+          if [ -z "$PKG" ]; then
+            echo "ERROR: Không tìm thấy file .deb"
+            exit 1
+          fi
+
+          echo "Found package: $PKG"
+
+          cp "$PKG" output/
+
+          DEB_NAME=$(basename "$PKG")
+          TIPA_NAME="${DEB_NAME%.deb}.tipa"
+
+          # TIPA về bản chất là ZIP chứa package payload.
+          cd output
+          zip -9 "$TIPA_NAME" "$DEB_NAME"
+
+          rm "$DEB_NAME"
+
+          echo "Created:"
+          ls -lh
+
+      - name: Upload TIPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TIPA-build
+          path: output/*.tipa
+          if-no-files-found: error
+          retention-days: 30
