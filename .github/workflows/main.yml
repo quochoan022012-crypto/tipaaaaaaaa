@@ -1,3 +1,117 @@
+name: Build TIPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build TIPA
+    runs-on: ubuntu-24.04
+
+    env:
+      THEOS: ${{ github.workspace }}/theos
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          sudo apt-get update
+
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            build-essential \
+            clang \
+            make \
+            perl \
+            git \
+            curl \
+            wget \
+            unzip \
+            zip \
+            xz-utils \
+            rsync \
+            fakeroot \
+            ca-certificates \
+            libxml2 \
+            libio-compress-lzma-perl
+
+      - name: Install Theos
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          rm -rf "$THEOS"
+
+          git clone --recursive \
+            https://github.com/theos/theos.git \
+            "$THEOS"
+
+          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
+
+          test -f "$THEOS/makefiles/common.mk"
+
+          echo "Theos installed successfully"
+
+      - name: Install Theos dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          cd "$THEOS"
+
+          if [ -x "./bin/bootstrap.sh" ]; then
+            ./bin/bootstrap.sh || true
+          fi
+
+          echo "Theos directory:"
+          ls -la "$THEOS"
+
+      - name: Verify project
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "======================================"
+          echo "PROJECT"
+          echo "======================================"
+
+          pwd
+
+          find . -maxdepth 3 -type f | sort
+
+          echo "======================================"
+          echo "MAKEFILE"
+          echo "======================================"
+
+          if [ -f Makefile ]; then
+            cat Makefile
+          elif [ -f makefile ]; then
+            cat makefile
+          else
+            echo "ERROR: Makefile không tồn tại"
+            exit 1
+          fi
+
+          echo "======================================"
+          echo "THEOS"
+          echo "======================================"
+
+          test -d "$THEOS"
+          test -f "$THEOS/makefiles/common.mk"
+
       - name: Build package
         shell: bash
         run: |
@@ -5,15 +119,15 @@
 
           export THEOS="$GITHUB_WORKSPACE/theos"
 
-          echo "========================================"
+          echo "======================================"
           echo "CLEAN"
-          echo "========================================"
+          echo "======================================"
 
           make clean || true
 
-          echo "========================================"
-          echo "BUILD"
-          echo "========================================"
+          echo "======================================"
+          echo "BUILD TIPA PACKAGE"
+          echo "======================================"
 
           make package \
             FINALPACKAGE=1 \
@@ -23,28 +137,91 @@
 
           BUILD_EXIT=${PIPESTATUS[0]}
 
-          echo "========================================"
+          echo "======================================"
           echo "BUILD EXIT CODE: $BUILD_EXIT"
-          echo "========================================"
+          echo "======================================"
 
           if [ "$BUILD_EXIT" -ne 0 ]; then
             echo ""
-            echo "========== COMPILER ERRORS =========="
+            echo "======================================"
+            echo "COMPILER ERRORS"
+            echo "======================================"
 
             grep -n -E \
               "error:|fatal error:|undefined|No such file|not found|undeclared|unknown type|use of undeclared" \
-              build.log \
-              || true
+              build.log || true
 
             echo ""
-            echo "========== LAST 150 LINES =========="
+            echo "======================================"
+            echo "LAST 200 LOG LINES"
+            echo "======================================"
 
-            tail -n 150 build.log
+            tail -n 200 build.log
 
             exit "$BUILD_EXIT"
           fi
 
           echo "BUILD SUCCESS"
+
+      - name: Find package
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          echo "======================================"
+          echo "SEARCH PACKAGE"
+          echo "======================================"
+
+          find . -type f \
+            \( -name "*.deb" -o -name "*.tipa" -o -name "*.ipa" \) \
+            -print
+
+          DEB=$(find packages .theos \
+            -type f \
+            -name "*.deb" \
+            2>/dev/null | head -n 1 || true)
+
+          if [ -z "$DEB" ]; then
+            echo "ERROR: Không tìm thấy file .deb"
+            exit 1
+          fi
+
+          echo "DEB=$DEB" >> "$GITHUB_ENV"
+
+          echo "Package:"
+          echo "$DEB"
+
+      - name: Create TIPA
+        shell: bash
+        run: |
+          set -euxo pipefail
+
+          mkdir -p output
+
+          cp "$DEB" output/
+
+          DEB_NAME="$(basename "$DEB")"
+          TIPA_NAME="${DEB_NAME%.deb}.tipa"
+
+          cd output
+
+          zip -9 "$TIPA_NAME" "$DEB_NAME"
+
+          rm -f "$DEB_NAME"
+
+          echo "======================================"
+          echo "TIPA CREATED"
+          echo "======================================"
+
+          ls -lah
+
+      - name: Upload TIPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: TIPA-build
+          path: output/*.tipa
+          if-no-files-found: error
+          retention-days: 30
 
       - name: Upload build log
         if: always()
@@ -53,3 +230,4 @@
           name: build-log
           path: build.log
           if-no-files-found: ignore
+          retention-days: 7
