@@ -1,234 +1,55 @@
-name: Build TIPA
-
-on:
-  workflow_dispatch:
-  push:
-    branches:
-      - main
-
-permissions:
-  contents: read
-
-jobs:
-  build:
-    name: Build TIPA
-    runs-on: ubuntu-24.04
-
-    env:
-      THEOS: ${{ github.workspace }}/theos
-
-    steps:
-      # ==========================================
-      # 1. CHECKOUT
-      # ==========================================
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          fetch-depth: 0
-
-      # ==========================================
-      # 2. INSTALL BASIC DEPENDENCIES
-      # ==========================================
-      - name: Install dependencies
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          sudo apt-get update
-
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-            build-essential \
-            fakeroot \
-            rsync \
-            curl \
-            perl \
-            git \
-            zip \
-            unzip \
-            xz-utils \
-            libxml2 \
-            libio-compress-lzma-perl \
-            ca-certificates
-
-          echo "Dependencies installed successfully."
-
-      # ==========================================
-      # 3. INSTALL THEOS
-      # ==========================================
-      - name: Install Theos
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          rm -rf "$THEOS"
-
-          git clone --recursive \
-            https://github.com/theos/theos.git \
-            "$THEOS"
-
-          echo "THEOS=$THEOS" >> "$GITHUB_ENV"
-
-          echo "Theos installed:"
-          ls -la "$THEOS"
-
-      # ==========================================
-      # 4. INSTALL THEOS SDK
-      # ==========================================
-      - name: Install iOS SDK
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          cd "$THEOS"
-
-          ./bin/install-sdk latest
-
-          echo "Installed SDKs:"
-          ls -lah "$THEOS/sdks"
-
-      # ==========================================
-      # 5. VERIFY TOOLCHAIN
-      # ==========================================
-      - name: Verify Theos
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          echo "================================"
-          echo "THEOS"
-          echo "================================"
-
-          echo "$THEOS"
-
-          test -d "$THEOS"
-          test -f "$THEOS/makefiles/common.mk"
-
-          echo "================================"
-          echo "SDK"
-          echo "================================"
-
-          find "$THEOS/sdks" -maxdepth 1 -type d -print
-
-          echo "================================"
-          echo "TOOLCHAIN"
-          echo "================================"
-
-          find "$THEOS/toolchain" -maxdepth 2 -type f \
-            \( -name "clang" -o -name "clang++" -o -name "ldid" \) \
-            -print || true
-
-      # ==========================================
-      # 6. VERIFY PROJECT
-      # ==========================================
-      - name: Verify project
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          echo "================================"
-          echo "PROJECT FILES"
-          echo "================================"
-
-          find . -maxdepth 3 -type f | sort
-
-          echo "================================"
-          echo "MAKEFILE"
-          echo "================================"
-
-          if [ -f Makefile ]; then
-            cat Makefile
-          elif [ -f makefile ]; then
-            cat makefile
-          else
-            echo "ERROR: Không tìm thấy Makefile/makefile"
-            exit 1
-          fi
-
-      # ==========================================
-      # 7. BUILD
-      # ==========================================
       - name: Build package
         shell: bash
         run: |
-          set -euxo pipefail
+          set -o pipefail
 
           export THEOS="$GITHUB_WORKSPACE/theos"
 
+          echo "========================================"
+          echo "CLEAN"
+          echo "========================================"
+
           make clean || true
+
+          echo "========================================"
+          echo "BUILD"
+          echo "========================================"
 
           make package \
             FINALPACKAGE=1 \
             STRIP=0 \
-            messages=yes
+            messages=yes \
+            2>&1 | tee build.log
 
-      # ==========================================
-      # 8. FIND DEB
-      # ==========================================
-      - name: Find package
-        shell: bash
-        run: |
-          set -euxo pipefail
+          BUILD_EXIT=${PIPESTATUS[0]}
 
-          echo "================================"
-          echo "SEARCHING PACKAGE"
-          echo "================================"
+          echo "========================================"
+          echo "BUILD EXIT CODE: $BUILD_EXIT"
+          echo "========================================"
 
-          find . \
-            -type f \
-            \( -name "*.deb" -o -name "*.tipa" -o -name "*.ipa" \) \
-            -print
+          if [ "$BUILD_EXIT" -ne 0 ]; then
+            echo ""
+            echo "========== COMPILER ERRORS =========="
 
-          DEB=$(find packages .theos \
-            -type f \
-            -name "*.deb" \
-            2>/dev/null | head -n 1 || true)
+            grep -n -E \
+              "error:|fatal error:|undefined|No such file|not found|undeclared|unknown type|use of undeclared" \
+              build.log \
+              || true
 
-          if [ -z "$DEB" ]; then
-            echo "ERROR: Không tìm thấy file .deb"
-            exit 1
+            echo ""
+            echo "========== LAST 150 LINES =========="
+
+            tail -n 150 build.log
+
+            exit "$BUILD_EXIT"
           fi
 
-          echo "DEB=$DEB" >> "$GITHUB_ENV"
+          echo "BUILD SUCCESS"
 
-          echo "Found:"
-          echo "$DEB"
-
-      # ==========================================
-      # 9. CREATE TIPA
-      # ==========================================
-      - name: Create TIPA
-        shell: bash
-        run: |
-          set -euxo pipefail
-
-          mkdir -p output
-
-          cp "$DEB" output/
-
-          DEB_NAME="$(basename "$DEB")"
-
-          TIPA_NAME="${DEB_NAME%.deb}.tipa"
-
-          cd output
-
-          zip -9 "$TIPA_NAME" "$DEB_NAME"
-
-          rm -f "$DEB_NAME"
-
-          echo "================================"
-          echo "TIPA CREATED"
-          echo "================================"
-
-          ls -lah
-
-      # ==========================================
-      # 10. UPLOAD TIPA
-      # ==========================================
-      - name: Upload TIPA
+      - name: Upload build log
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TIPA
-          path: output/*.tipa
-          if-no-files-found: error
-          retention-days: 30
+          name: build-log
+          path: build.log
+          if-no-files-found: ignore
