@@ -40,10 +40,13 @@ jobs:
             libbz2-dev \
             libreadline-dev \
             zlib1g-dev
-          # Cài ldid từ đúng URL raw
-          wget -O ldid https://raw.githubusercontent.com/theos/ldid/master/ldid
-          chmod +x ldid
-          sudo mv ldid /usr/local/bin/
+          # Build ldid từ source
+          git clone https://github.com/theos/ldid.git
+          cd ldid
+          make
+          sudo make install
+          cd ..
+          rm -rf ldid
 
       - name: Cache Theos
         id: cache-theos
