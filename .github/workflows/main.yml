@@ -31,7 +31,6 @@ jobs:
             curl \
             unzip \
             wget \
-            ldid \
             fakeroot \
             dpkg-dev \
             xz-utils \
@@ -41,6 +40,10 @@ jobs:
             libbz2-dev \
             libreadline-dev \
             zlib1g-dev
+          # Cài ldid (không có sẵn trong Ubuntu repo)
+          wget -O ldid https://github.com/theos/ldid/raw/master/ldid
+          chmod +x ldid
+          sudo mv ldid /usr/local/bin/
 
       - name: Cache Theos
         id: cache-theos
@@ -68,12 +71,9 @@ jobs:
           set -euxo pipefail
           mkdir -p "$THEOS/sdks"
           cd "$THEOS/sdks"
-          # Tải SDK từ kho theos/sdks
           git clone --depth 1 https://github.com/theos/sdks.git /tmp/theos-sdks
           find /tmp/theos-sdks -maxdepth 1 -type f -name "*.sdk.tar.xz" -exec tar -xf {} -C "$THEOS/sdks" \;
-          # Xóa thư mục tạm
           rm -rf /tmp/theos-sdks
-          # Kiểm tra xem đã cài SDK thành công chưa
           if ! find "$THEOS/sdks" -maxdepth 1 -type d -name "*.sdk" | grep -q .; then
             echo "ERROR: No iOS SDK was installed."
             exit 1
@@ -89,7 +89,6 @@ jobs:
 
       - name: Fix Makefile (optional)
         run: |
-          # Sửa lỗi cú pháp dòng export trong Makefile nếu có
           if grep -q '^export = THEOS' makefile; then
             sed -i 's/^export = THEOS \/home\/codespace\/theos/export THEOS=\/home\/codespace\/theos/' makefile
             echo "Fixed export line in Makefile"
